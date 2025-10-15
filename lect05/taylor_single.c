@@ -10,7 +10,7 @@ int main() {
 	sinx_taylor(N, 3, x, res);
 	for(int i=0; i<N; i++) {
 		printf("sin(%.2f) by Taylor series = %f\n", x[i], res[i]);
-		printf("sin(%.2f) = %f\n', x[i], sin(x[i]));
+		printf("sin(%.2f) = %f\n", x[i], sin(x[i]));
 	}
 	
 	return 0;

@@ -11,50 +11,43 @@
 
 
 void sinx_taylor(int num_elements, int terms, double* x, double* result) {
-	int child_id, pid;
-	int length;
-	char message[MAXLINE], line[MAXLINE];
-	int fd[2*N];
-	for (int i=0; i<num_element; i++) {
-		child_id = i;
-		pipe(fd + 2 * i);
+	int fd[N][2]
+	pid_t pid
+
+	for (int i=0; i<num_elements; i++) {
+		pipe(fd[i]);
 		pid = fork();
-		if (pid == 0) break;
-	}
 
+		if (pid == 0) {
+			close(fd[i][0]);
 
-	if (pid == 0) {
-		close(fd[0]);
-       		double value = x[i];
-       		double numer = x[i] * x[i] * x[i];
-       		double denom = 6.;
-       		int sign = -1;
+       			double value = x[i];
+       			double numer = x[i] * x[i] * x[i];
+       			double denom = 6.;
+       			int sign = -1;
 
-       		for (int j=1; j<=terms; j++) {
-	       		value += (double)sign * numer /denom;
-	       		numer *= x[i] * x[i];
-	       		denom *= (2.*(double)j+2.) * (2.*(double)j+3.);
-	       		sign *= -1;
+       			for (int j=1; j<=terms; j++) {
+	       			value += (double)sign * numer /denom;
+	       			numer *= x[i] * x[i];
+	       			denom *= (2.*(double)j+2.) * (2.*(double)j+3.);
+	       			sign *= -1;
+			}
+		
+			char message[MAXLINE];	
+			sprintf(message, "%lf", value);
+			write(fd[i][1], message, strlen(message) + 1);
+			close(fd[i][1]);
+			exit(0);
+		} else {
+			close(fd[i][1]);
 		}
-
-		result[i] = value;
-		sprintf(message, "%lf", result[i]);
-		length = strlen(message)+1;
-		write(fd[1], message, length);
-
-		exit(0);
 	}
-
-	// parent
-	for (int i=0; i<N; i++) {
-		close(fd[2*i+1]);
-
-		int status;
-		wait(&status);
-
-		int child_id = status >> 0;	
-		int n = read(fd[2*child_id], line, MAXLINE);
-		result[child_id] = atof(line);
+	for (int i=0; i<num_elements; i++) {
+		char line[MAXLINE];
+		read(fd[i][0], line MAXLINE);
+		result[i] = atof(line);
+		close(fd[i][0]);
+		wait(NULL);
 	}	
 }
 
@@ -69,6 +62,7 @@ void main() {
 		printf("sin(%.2f) by Taylor series = %f\n", x[i], res[i]);
 		printf("sin(%.2f) = %f\n", x[i], sin(x[i]));
 	}
+
 	return 0;
 
 }

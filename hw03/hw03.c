@@ -43,6 +43,7 @@ int timer_tick = 0;
 
 // 자식 프로세스의 CPU 버스트 (각 자식이 개별적으로 관리)
 int my_cpu_burst = 0;
+volatile sig_atomic_t child_ready = 0;
 
 // 함수 선언
 void parent_process();
@@ -50,6 +51,7 @@ void child_process(int id);
 void timer_handler(int signum);
 void io_request_handler(int signum);
 void child_signal_handler(int signum);
+void child_done_handler(int signum);
 void schedule();
 void push_ready(int idx);
 int pop_ready();
@@ -126,6 +128,29 @@ void reset_all_quantum() {
     }
 }
 
+// 자식 프로세스 종료 핸들러
+void child_done_handler(int signum) {
+    // 종료된 자식 찾기
+    pid_t child_pid;
+    int status;
+    
+    while ((child_pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        for (int i = 0; i < NUM_PROCESSES; i++) {
+            if (pcb[i].pid == child_pid) {
+                printf("[PARENT] Process %d (PID: %d) terminated\n", i, child_pid);
+                fflush(stdout);
+                pcb[i].state = DONE;
+                done_count++;
+                
+                if (current_process == i) {
+                    current_process = -1;
+                }
+                break;
+            }
+        }
+    }
+}
+
 // 타이머 시그널 핸들러
 void timer_handler(int signum) {
     timer_tick++;
@@ -146,8 +171,7 @@ void timer_handler(int signum) {
             printf("[PARENT] Process %d quantum exhausted, preempting\n", current_process);
             fflush(stdout);
             
-            // 프로세스를 정지시키고 Ready 큐에 추가
-            kill(pcb[current_process].pid, SIGSTOP);
+            // Ready 큐에 추가하고 다음 프로세스로
             push_ready(current_process);
             current_process = -1;
         } else {
@@ -163,6 +187,11 @@ void timer_handler(int signum) {
     
     // 스케줄링
     schedule();
+    
+    // 다음 타이머 설정
+    if (done_count < NUM_PROCESSES) {
+        alarm(1);
+    }
 }
 
 // I/O 요청 시그널 핸들러
@@ -178,7 +207,6 @@ void io_request_handler(int signum) {
         fflush(stdout);
         
         // Sleep 큐에 추가
-        kill(pcb[current_process].pid, SIGSTOP);
         push_sleep(current_process);
         current_process = -1;
     }
@@ -197,8 +225,7 @@ void schedule() {
                    current_process, pcb[current_process].pid, pcb[current_process].quantum);
             fflush(stdout);
             
-            // 프로세스 실행
-            kill(pcb[current_process].pid, SIGCONT);
+            // 프로세스 실행 시그널 전송
             kill(pcb[current_process].pid, SIGUSR1);
         } else {
             printf("[PARENT] No process in Ready queue\n");
@@ -209,13 +236,6 @@ void schedule() {
     // 모든 프로세스가 완료되었는지 확인
     if (done_count >= NUM_PROCESSES) {
         printf("\n[PARENT] All processes completed!\n");
-        fflush(stdout);
-        
-        // 모든 자식 프로세스 대기
-        for (int i = 0; i < NUM_PROCESSES; i++) {
-            waitpid(pcb[i].pid, NULL, 0);
-        }
-        
         printf("[PARENT] Simulation completed successfully!\n");
         fflush(stdout);
         exit(0);
@@ -225,6 +245,8 @@ void schedule() {
 // 자식 프로세스 시그널 핸들러
 void child_signal_handler(int signum) {
     if (signum == SIGUSR1) {
+        child_ready = 1;
+        
         // CPU 버스트 감소
         my_cpu_burst--;
         printf("  [CHILD %d] Executing... CPU burst remaining: %d\n", getpid(), my_cpu_burst);
@@ -238,7 +260,6 @@ void child_signal_handler(int signum) {
                 // 프로세스 종료
                 printf("  [CHILD %d] CPU burst completed, terminating\n", getpid());
                 fflush(stdout);
-                kill(getppid(), SIGCHLD);
                 exit(0);
             } else {
                 // I/O 요청
@@ -248,6 +269,8 @@ void child_signal_handler(int signum) {
                 
                 // I/O 완료 후 새로운 CPU 버스트 할당
                 my_cpu_burst = (rand() % (MAX_CPU_BURST - MIN_CPU_BURST + 1)) + MIN_CPU_BURST;
+                printf("  [CHILD %d] New CPU burst assigned: %d\n", getpid(), my_cpu_burst);
+                fflush(stdout);
             }
         }
     }
@@ -261,7 +284,7 @@ void parent_process() {
     // 시그널 핸들러 설정
     signal(SIGALRM, timer_handler);
     signal(SIGUSR2, io_request_handler);
-    signal(SIGCHLD, SIG_IGN); // 자식 종료 시그널은 무시 (좀비 프로세스 방지)
+    signal(SIGCHLD, child_done_handler);
     
     // PCB 초기화 및 자식 프로세스 생성
     for (int i = 0; i < NUM_PROCESSES; i++) {
@@ -290,8 +313,10 @@ void parent_process() {
     printf("\n[PARENT] All processes created, starting scheduler...\n\n");
     fflush(stdout);
     
+    // 자식들이 준비될 때까지 대기
+    sleep(2);
+    
     // 초기 스케줄링
-    sleep(1); // 자식들이 준비될 때까지 대기
     schedule();
     
     // 타이머 시작 (1초마다)
@@ -316,10 +341,7 @@ void child_process(int id) {
     // 시그널 핸들러 설정
     signal(SIGUSR1, child_signal_handler);
     
-    // SIGSTOP으로 대기
-    kill(getpid(), SIGSTOP);
-    
-    // 무한 루프 (시그널 대기)
+    // 무한 루프 (시그널 대기) - SIGSTOP 제거
     while (1) {
         pause();
     }

@@ -43,7 +43,6 @@ int timer_tick = 0;
 
 // 자식 프로세스의 CPU 버스트 (각 자식이 개별적으로 관리)
 int my_cpu_burst = 0;
-volatile sig_atomic_t child_ready = 0;
 
 // 함수 선언
 void parent_process();
@@ -59,12 +58,26 @@ void push_sleep(int idx);
 void update_sleep_queue();
 int all_quantum_zero();
 void reset_all_quantum();
+void print_queue_status();
+
+// Ready 큐 상태 출력 (디버깅용)
+void print_queue_status() {
+    printf("[DEBUG] Ready queue: front=%d, rear=%d, count=%d | ", 
+           ready_front, ready_rear, (ready_rear - ready_front + NUM_PROCESSES) % NUM_PROCESSES);
+    printf("Current process: %d | Done: %d/%d | Sleep queue: %d\n", 
+           current_process, done_count, NUM_PROCESSES, sleep_count);
+    fflush(stdout);
+}
 
 // Ready 큐에 추가
 void push_ready(int idx) {
+    if (pcb[idx].state == DONE) return; // 종료된 프로세스는 추가하지 않음
+    
     ready_queue[ready_rear] = idx;
     ready_rear = (ready_rear + 1) % NUM_PROCESSES;
     pcb[idx].state = READY;
+    printf("[DEBUG] Process %d pushed to Ready queue\n", idx);
+    fflush(stdout);
 }
 
 // Ready 큐에서 꺼내기
@@ -74,6 +87,8 @@ int pop_ready() {
     }
     int idx = ready_queue[ready_front];
     ready_front = (ready_front + 1) % NUM_PROCESSES;
+    printf("[DEBUG] Process %d popped from Ready queue\n", idx);
+    fflush(stdout);
     return idx;
 }
 
@@ -144,6 +159,8 @@ void child_done_handler(int signum) {
                 
                 if (current_process == i) {
                     current_process = -1;
+                    // 즉시 다음 프로세스 스케줄링
+                    schedule();
                 }
                 break;
             }
@@ -155,7 +172,7 @@ void child_done_handler(int signum) {
 void timer_handler(int signum) {
     timer_tick++;
     printf("\n=== Timer Tick %d ===\n", timer_tick);
-    fflush(stdout);
+    print_queue_status();
     
     // Sleep 큐 업데이트
     update_sleep_queue();
@@ -209,13 +226,16 @@ void io_request_handler(int signum) {
         // Sleep 큐에 추가
         push_sleep(current_process);
         current_process = -1;
+        
+        // 즉시 다음 프로세스 스케줄링
+        schedule();
     }
 }
 
 // 스케줄링 함수
 void schedule() {
     // 현재 프로세스가 없으면 다음 프로세스 선택
-    if (current_process == -1 || pcb[current_process].state != RUNNING) {
+    if (current_process == -1) {
         int next = pop_ready();
         
         if (next != -1) {
@@ -245,8 +265,6 @@ void schedule() {
 // 자식 프로세스 시그널 핸들러
 void child_signal_handler(int signum) {
     if (signum == SIGUSR1) {
-        child_ready = 1;
-        
         // CPU 버스트 감소
         my_cpu_burst--;
         printf("  [CHILD %d] Executing... CPU burst remaining: %d\n", getpid(), my_cpu_burst);
@@ -317,6 +335,7 @@ void parent_process() {
     sleep(2);
     
     // 초기 스케줄링
+    print_queue_status();
     schedule();
     
     // 타이머 시작 (1초마다)
@@ -341,7 +360,7 @@ void child_process(int id) {
     // 시그널 핸들러 설정
     signal(SIGUSR1, child_signal_handler);
     
-    // 무한 루프 (시그널 대기) - SIGSTOP 제거
+    // 무한 루프 (시그널 대기)
     while (1) {
         pause();
     }

@@ -40,6 +40,14 @@ typedef struct {
     int cpu_burst;
     int io_wait;
     ProcessState state;
+    
+    // 성능 측정용
+    int creation_time;      // 생성 시간
+    int first_run_time;     // 첫 실행 시간 (-1이면 아직 실행 안됨)
+    int completion_time;    // 종료 시간
+    int total_wait_time;    // 총 ready 큐 대기 시간
+    int ready_enter_time;   // ready 큐 진입 시간
+    int wait_count;         // ready 큐 진입 횟수
 } PCB;
 
 // 전역 변수
@@ -70,6 +78,7 @@ void update_sleep_queue();
 int all_quantum_zero();
 void reset_all_quantum();
 void print_status();
+void print_statistics();
 const char* state_to_string(ProcessState state);
 
 // 상태를 문자열로 변환
@@ -125,6 +134,52 @@ void print_status() {
     fflush(stdout);
 }
 
+// 성능 통계 출력
+void print_statistics() {
+    printf("\n");
+    printf("╔═══════════════════════════════════════════════════════════════════════════╗\n");
+    printf("║                      " COLOR_CYAN "성능 분석 결과" COLOR_RESET "                                    ║\n");
+    printf("╠═══════════════════════════════════════════════════════════════════════════╣\n");
+    printf("║ " COLOR_CYAN "P#" COLOR_RESET " │ " COLOR_CYAN "Wait Time" COLOR_RESET " │ " COLOR_CYAN "Response Time" COLOR_RESET " │ " COLOR_CYAN "Turnaround Time" COLOR_RESET " │ " COLOR_CYAN "Wait Count" COLOR_RESET " ║\n");
+    printf("╠═══════════════════════════════════════════════════════════════════════════╣\n");
+    
+    int total_wait = 0;
+    int total_response = 0;
+    int total_turnaround = 0;
+    
+    for (int i = 0; i < NUM_PROCESSES; i++) {
+        int response_time = pcb[i].first_run_time - pcb[i].creation_time;
+        int turnaround_time = pcb[i].completion_time - pcb[i].creation_time;
+        
+        printf("║ %2d │   %4d    │      %4d       │       %4d        │    %4d    ║\n",
+               i,
+               pcb[i].total_wait_time,
+               response_time,
+               turnaround_time,
+               pcb[i].wait_count);
+        
+        total_wait += pcb[i].total_wait_time;
+        total_response += response_time;
+        total_turnaround += turnaround_time;
+    }
+    
+    printf("╠═══════════════════════════════════════════════════════════════════════════╣\n");
+    printf("║ " COLOR_YELLOW "평균" COLOR_RESET " │   %4.1f    │      %4.1f       │       %4.1f        │            ║\n",
+           total_wait / (float)NUM_PROCESSES,
+           total_response / (float)NUM_PROCESSES,
+           total_turnaround / (float)NUM_PROCESSES);
+    printf("╚═══════════════════════════════════════════════════════════════════════════╝\n");
+    
+    printf("\n");
+    printf("📊 " COLOR_CYAN "용어 설명:" COLOR_RESET "\n");
+    printf("  • " COLOR_GREEN "Wait Time" COLOR_RESET ":       Ready 큐에서 대기한 총 시간\n");
+    printf("  • " COLOR_GREEN "Response Time" COLOR_RESET ":   생성부터 첫 실행까지 시간\n");
+    printf("  • " COLOR_GREEN "Turnaround Time" COLOR_RESET ": 생성부터 종료까지 총 시간\n");
+    printf("  • " COLOR_GREEN "Wait Count" COLOR_RESET ":      Ready 큐에 진입한 횟수\n");
+    printf("\n");
+    fflush(stdout);
+}
+
 // Ready 큐에 추가
 void push_ready(int idx) {
     if (pcb[idx].state == DONE) return;
@@ -132,6 +187,10 @@ void push_ready(int idx) {
     ready_queue[ready_rear] = idx;
     ready_rear = (ready_rear + 1) % QUEUE_SIZE;
     pcb[idx].state = READY;
+    
+    // 성능 측정: ready 큐 진입 시간 기록
+    pcb[idx].ready_enter_time = timer_tick;
+    pcb[idx].wait_count++;
 }
 
 // Ready 큐에서 꺼내기
@@ -141,6 +200,10 @@ int pop_ready() {
     }
     int idx = ready_queue[ready_front];
     ready_front = (ready_front + 1) % QUEUE_SIZE;
+    
+    // 성능 측정: ready 큐에서 대기한 시간 누적
+    pcb[idx].total_wait_time += (timer_tick - pcb[idx].ready_enter_time);
+    
     return idx;
 }
 
@@ -203,6 +266,7 @@ void child_done_handler(int signum) {
                 printf("    ➜ " COLOR_RED "P%d 종료" COLOR_RESET "\n", i);
                 fflush(stdout);
                 pcb[i].state = DONE;
+                pcb[i].completion_time = timer_tick;  // 종료 시간 기록
                 done_count++;
                 
                 if (current_process == i) {
@@ -282,6 +346,12 @@ void schedule() {
         if (next != -1) {
             current_process = next;
             pcb[current_process].state = RUNNING;
+            
+            // 첫 실행 시간 기록 (Response Time 계산용)
+            if (pcb[current_process].first_run_time == -1) {
+                pcb[current_process].first_run_time = timer_tick;
+            }
+            
             printf("    ➜ " COLOR_MAGENTA "P%d 스케줄링" COLOR_RESET " (Quantum: %d)\n", 
                    current_process, pcb[current_process].quantum);
             fflush(stdout);
@@ -299,6 +369,10 @@ void schedule() {
         printf("║                                                ║\n");
         printf("╚════════════════════════════════════════════════╝\n");
         fflush(stdout);
+        
+        // 성능 통계 출력
+        print_statistics();
+        
         exit(0);
     }
 }
@@ -351,6 +425,14 @@ void parent_process() {
             pcb[i].cpu_burst = 0;
             pcb[i].io_wait = 0;
             pcb[i].state = READY;
+            
+            // 성능 측정 초기화
+            pcb[i].creation_time = 0;
+            pcb[i].first_run_time = -1;
+            pcb[i].completion_time = 0;
+            pcb[i].total_wait_time = 0;
+            pcb[i].ready_enter_time = 0;
+            pcb[i].wait_count = 0;
             
             printf("  ✓ P%d (PID: %d)\n", i, pid);
             fflush(stdout);

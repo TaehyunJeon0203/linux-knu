@@ -13,6 +13,7 @@
 #define MIN_CPU_BURST 1
 #define MAX_IO_WAIT 5
 #define MIN_IO_WAIT 1
+#define QUEUE_SIZE (NUM_PROCESSES + 1)  // 원형 큐는 한 칸 여유 필요
 
 // 프로세스 상태
 typedef enum {
@@ -33,7 +34,7 @@ typedef struct {
 
 // 전역 변수
 PCB pcb[NUM_PROCESSES];
-int ready_queue[NUM_PROCESSES];
+int ready_queue[QUEUE_SIZE];  // 크기를 NUM_PROCESSES + 1로 변경
 int ready_front = 0, ready_rear = 0;
 int sleep_queue[NUM_PROCESSES];
 int sleep_count = 0;
@@ -62,8 +63,9 @@ void print_queue_status();
 
 // Ready 큐 상태 출력 (디버깅용)
 void print_queue_status() {
+    int count = (ready_rear - ready_front + QUEUE_SIZE) % QUEUE_SIZE;
     printf("[DEBUG] Ready queue: front=%d, rear=%d, count=%d | ", 
-           ready_front, ready_rear, (ready_rear - ready_front + NUM_PROCESSES) % NUM_PROCESSES);
+           ready_front, ready_rear, count);
     printf("Current process: %d | Done: %d/%d | Sleep queue: %d\n", 
            current_process, done_count, NUM_PROCESSES, sleep_count);
     fflush(stdout);
@@ -74,7 +76,7 @@ void push_ready(int idx) {
     if (pcb[idx].state == DONE) return; // 종료된 프로세스는 추가하지 않음
     
     ready_queue[ready_rear] = idx;
-    ready_rear = (ready_rear + 1) % NUM_PROCESSES;
+    ready_rear = (ready_rear + 1) % QUEUE_SIZE;  // QUEUE_SIZE로 나눔
     pcb[idx].state = READY;
     printf("[DEBUG] Process %d pushed to Ready queue\n", idx);
     fflush(stdout);
@@ -86,7 +88,7 @@ int pop_ready() {
         return -1; // 큐가 비어있음
     }
     int idx = ready_queue[ready_front];
-    ready_front = (ready_front + 1) % NUM_PROCESSES;
+    ready_front = (ready_front + 1) % QUEUE_SIZE;  // QUEUE_SIZE로 나눔
     printf("[DEBUG] Process %d popped from Ready queue\n", idx);
     fflush(stdout);
     return idx;

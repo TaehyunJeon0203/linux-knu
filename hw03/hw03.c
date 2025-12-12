@@ -13,7 +13,17 @@
 #define MIN_CPU_BURST 1
 #define MAX_IO_WAIT 5
 #define MIN_IO_WAIT 1
-#define QUEUE_SIZE (NUM_PROCESSES + 1)  // 원형 큐는 한 칸 여유 필요
+#define QUEUE_SIZE (NUM_PROCESSES + 1)
+
+// ANSI 색상 코드
+#define COLOR_RESET   "\033[0m"
+#define COLOR_RED     "\033[1;31m"
+#define COLOR_GREEN   "\033[1;32m"
+#define COLOR_YELLOW  "\033[1;33m"
+#define COLOR_BLUE    "\033[1;34m"
+#define COLOR_MAGENTA "\033[1;35m"
+#define COLOR_CYAN    "\033[1;36m"
+#define COLOR_WHITE   "\033[1;37m"
 
 // 프로세스 상태
 typedef enum {
@@ -34,7 +44,7 @@ typedef struct {
 
 // 전역 변수
 PCB pcb[NUM_PROCESSES];
-int ready_queue[QUEUE_SIZE];  // 크기를 NUM_PROCESSES + 1로 변경
+int ready_queue[QUEUE_SIZE];
 int ready_front = 0, ready_rear = 0;
 int sleep_queue[NUM_PROCESSES];
 int sleep_count = 0;
@@ -42,7 +52,7 @@ int current_process = -1;
 int done_count = 0;
 int timer_tick = 0;
 
-// 자식 프로세스의 CPU 버스트 (각 자식이 개별적으로 관리)
+// 자식 프로세스의 CPU 버스트
 int my_cpu_burst = 0;
 
 // 함수 선언
@@ -59,38 +69,78 @@ void push_sleep(int idx);
 void update_sleep_queue();
 int all_quantum_zero();
 void reset_all_quantum();
-void print_queue_status();
+void print_status();
+const char* state_to_string(ProcessState state);
 
-// Ready 큐 상태 출력 (디버깅용)
-void print_queue_status() {
-    int count = (ready_rear - ready_front + QUEUE_SIZE) % QUEUE_SIZE;
-    printf("[DEBUG] Ready 큐: front=%d, rear=%d, count=%d | ", 
-           ready_front, ready_rear, count);
-    printf("Current process: %d | Done: %d/%d | Sleep 큐: %d\n", 
-           current_process, done_count, NUM_PROCESSES, sleep_count);
+// 상태를 문자열로 변환
+const char* state_to_string(ProcessState state) {
+    switch(state) {
+        case READY: return COLOR_GREEN "READY  " COLOR_RESET;
+        case RUNNING: return COLOR_CYAN "RUNNING" COLOR_RESET;
+        case SLEEPING: return COLOR_YELLOW "SLEEP  " COLOR_RESET;
+        case DONE: return COLOR_RED "DONE   " COLOR_RESET;
+        default: return "UNKNOWN";
+    }
+}
+
+// 전체 상태 출력
+void print_status() {
+    int ready_count = (ready_rear - ready_front + QUEUE_SIZE) % QUEUE_SIZE;
+    
+    printf("\n");
+    printf("╔════════════════════════════════════════════════════════════════════╗\n");
+    printf("║  " COLOR_CYAN "P#" COLOR_RESET "  │  " COLOR_CYAN "State" COLOR_RESET "   │ " COLOR_CYAN "Quantum" COLOR_RESET " │ " COLOR_CYAN "I/O Wait" COLOR_RESET " │");
+    
+    if (current_process != -1) {
+        printf("  " COLOR_MAGENTA "Running: P%d" COLOR_RESET, current_process);
+    }
+    printf("\n");
+    printf("╠════════════════════════════════════════════════════════════════════╣\n");
+    
+    for (int i = 0; i < NUM_PROCESSES; i++) {
+        printf("║  %s%2d%s │  %s  │    %s%d%s    │    %s%d%s     │",
+               pcb[i].state == RUNNING ? COLOR_MAGENTA : "",
+               i,
+               pcb[i].state == RUNNING ? COLOR_RESET : "",
+               state_to_string(pcb[i].state),
+               pcb[i].quantum > 0 ? COLOR_GREEN : COLOR_RED,
+               pcb[i].quantum,
+               COLOR_RESET,
+               pcb[i].io_wait > 0 ? COLOR_YELLOW : "",
+               pcb[i].io_wait,
+               COLOR_RESET);
+        
+        if (i == current_process) {
+            printf(" " COLOR_MAGENTA "◄" COLOR_RESET);
+        }
+        printf("\n");
+    }
+    
+    printf("╚════════════════════════════════════════════════════════════════════╝\n");
+    printf("  Ready: %s%d%s  │  Sleep: %s%d%s  │  Done: %s%d/%d%s\n",
+           COLOR_GREEN, ready_count, COLOR_RESET,
+           COLOR_YELLOW, sleep_count, COLOR_RESET,
+           COLOR_RED, done_count, NUM_PROCESSES, COLOR_RESET);
+    printf("\n");
     fflush(stdout);
 }
 
 // Ready 큐에 추가
 void push_ready(int idx) {
-    if (pcb[idx].state == DONE) return; // 종료된 프로세스는 추가하지 않음
+    if (pcb[idx].state == DONE) return;
     
     ready_queue[ready_rear] = idx;
-    ready_rear = (ready_rear + 1) % QUEUE_SIZE;  // QUEUE_SIZE로 나눔
+    ready_rear = (ready_rear + 1) % QUEUE_SIZE;
     pcb[idx].state = READY;
-    printf("[DEBUG] Process %d pushed to Ready 큐\n", idx);
-    fflush(stdout);
 }
 
 // Ready 큐에서 꺼내기
 int pop_ready() {
     if (ready_front == ready_rear) {
-        return -1; // 큐가 비어있음
+        return -1;
     }
     int idx = ready_queue[ready_front];
-    ready_front = (ready_front + 1) % QUEUE_SIZE;  // QUEUE_SIZE로 나눔
-    printf("[DEBUG] Process %d popped from Ready 큐\n", idx);
-    fflush(stdout);
+    ready_front = (ready_front + 1) % QUEUE_SIZE;
     return idx;
 }
 
@@ -100,21 +150,18 @@ void push_sleep(int idx) {
     pcb[idx].state = SLEEPING;
 }
 
-// Sleep 큐 업데이트 (대기 시간 감소)
+// Sleep 큐 업데이트
 void update_sleep_queue() {
     for (int i = 0; i < sleep_count; i++) {
         int idx = sleep_queue[i];
         pcb[idx].io_wait--;
         
         if (pcb[idx].io_wait <= 0) {
-            printf("[PARENT] Process %d (PID: %d) I/O completed, moving to Ready 큐\n", 
-                   idx, pcb[idx].pid);
+            printf("    ➜ " COLOR_GREEN "P%d I/O 완료" COLOR_RESET " → Ready Queue\n", idx);
             fflush(stdout);
             
-            // Ready 큐로 이동
             push_ready(idx);
             
-            // Sleep 큐에서 제거
             for (int j = i; j < sleep_count - 1; j++) {
                 sleep_queue[j] = sleep_queue[j + 1];
             }
@@ -136,7 +183,7 @@ int all_quantum_zero() {
 
 // 모든 프로세스의 타임퀀텀 초기화
 void reset_all_quantum() {
-    printf("[PARENT] 모든 퀀텀 소진, 모든 프로세스의 퀀텀 초기화\n");
+    printf("\n    " COLOR_MAGENTA "⚡ 모든 프로세스 타임퀀텀 초기화" COLOR_RESET "\n");
     fflush(stdout);
     for (int i = 0; i < NUM_PROCESSES; i++) {
         if (pcb[i].state != DONE) {
@@ -147,21 +194,19 @@ void reset_all_quantum() {
 
 // 자식 프로세스 종료 핸들러
 void child_done_handler(int signum) {
-    // 종료된 자식 찾기
     pid_t child_pid;
     int status;
     
     while ((child_pid = waitpid(-1, &status, WNOHANG)) > 0) {
         for (int i = 0; i < NUM_PROCESSES; i++) {
             if (pcb[i].pid == child_pid) {
-                printf("[PARENT] Process %d (PID: %d) terminated\n", i, child_pid);
+                printf("    ➜ " COLOR_RED "P%d 종료" COLOR_RESET "\n", i);
                 fflush(stdout);
                 pcb[i].state = DONE;
                 done_count++;
                 
                 if (current_process == i) {
                     current_process = -1;
-                    // 즉시 다음 프로세스 스케줄링
                     schedule();
                 }
                 break;
@@ -173,8 +218,7 @@ void child_done_handler(int signum) {
 // 타이머 시그널 핸들러
 void timer_handler(int signum) {
     timer_tick++;
-    printf("\n=== Timer Tick %d ===\n", timer_tick);
-    print_queue_status();
+    printf("\n" COLOR_BLUE "═══════════════════ Timer Tick %d ═══════════════════" COLOR_RESET "\n", timer_tick);
     
     // Sleep 큐 업데이트
     update_sleep_queue();
@@ -182,19 +226,17 @@ void timer_handler(int signum) {
     // 현재 실행 중인 프로세스 처리
     if (current_process != -1 && pcb[current_process].state == RUNNING) {
         pcb[current_process].quantum--;
-        printf("[PARENT] Process %d 퀀텀: %d -> %d\n", 
+        printf("    ➜ " COLOR_CYAN "P%d 실행" COLOR_RESET " (Quantum: %d → %d)\n", 
                current_process, pcb[current_process].quantum + 1, pcb[current_process].quantum);
         fflush(stdout);
         
         if (pcb[current_process].quantum <= 0) {
-            printf("[PARENT] Process %d 퀀텀 소진, 선점\n", current_process);
+            printf("    ➜ " COLOR_YELLOW "P%d 타임퀀텀 소진" COLOR_RESET " → Ready Queue\n", current_process);
             fflush(stdout);
             
-            // Ready 큐에 추가하고 다음 프로세스로
             push_ready(current_process);
             current_process = -1;
         } else {
-            // 계속 실행 - 자식에게 시그널 전송
             kill(pcb[current_process].pid, SIGUSR1);
         }
     }
@@ -207,6 +249,9 @@ void timer_handler(int signum) {
     // 스케줄링
     schedule();
     
+    // 상태 출력
+    print_status();
+    
     // 다음 타이머 설정
     if (done_count < NUM_PROCESSES) {
         alarm(1);
@@ -216,49 +261,43 @@ void timer_handler(int signum) {
 // I/O 요청 시그널 핸들러
 void io_request_handler(int signum) {
     if (current_process != -1) {
-        printf("[PARENT] Process %d (PID: %d) I/O 요청\n", 
-               current_process, pcb[current_process].pid);
-        fflush(stdout);
-        
-        // I/O 대기 시간 랜덤 할당
         pcb[current_process].io_wait = (rand() % (MAX_IO_WAIT - MIN_IO_WAIT + 1)) + MIN_IO_WAIT;
-        printf("[PARENT] I/O 대기 시간 할당: %d 틱\n", pcb[current_process].io_wait);
+        
+        printf("    ➜ " COLOR_YELLOW "P%d I/O 요청" COLOR_RESET " (대기 시간: %d 틱)\n", 
+               current_process, pcb[current_process].io_wait);
         fflush(stdout);
         
-        // Sleep 큐에 추가
         push_sleep(current_process);
         current_process = -1;
         
-        // 즉시 다음 프로세스 스케줄링
         schedule();
     }
 }
 
 // 스케줄링 함수
 void schedule() {
-    // 현재 프로세스가 없으면 다음 프로세스 선택
     if (current_process == -1) {
         int next = pop_ready();
         
         if (next != -1) {
             current_process = next;
             pcb[current_process].state = RUNNING;
-            printf("[PARENT] Scheduling Process %d (PID: %d, 퀀텀: %d)\n", 
-                   current_process, pcb[current_process].pid, pcb[current_process].quantum);
+            printf("    ➜ " COLOR_MAGENTA "P%d 스케줄링" COLOR_RESET " (Quantum: %d)\n", 
+                   current_process, pcb[current_process].quantum);
             fflush(stdout);
             
-            // 프로세스 실행 시그널 전송
             kill(pcb[current_process].pid, SIGUSR1);
-        } else {
-            printf("[PARENT] No process in Ready 큐\n");
-            fflush(stdout);
         }
     }
     
-    // 모든 프로세스가 완료되었는지 확인
     if (done_count >= NUM_PROCESSES) {
-        printf("\n[PARENT] All processes completed!\n");
-        printf("[PARENT] Simulation completed successfully!\n");
+        printf("\n");
+        printf("╔════════════════════════════════════════════════╗\n");
+        printf("║                                                ║\n");
+        printf("║     " COLOR_GREEN "✓ 모든 프로세스 완료!" COLOR_RESET "                  ║\n");
+        printf("║     " COLOR_CYAN "시뮬레이션 종료" COLOR_RESET "                       ║\n");
+        printf("║                                                ║\n");
+        printf("╚════════════════════════════════════════════════╝\n");
         fflush(stdout);
         exit(0);
     }
@@ -267,30 +306,16 @@ void schedule() {
 // 자식 프로세스 시그널 핸들러
 void child_signal_handler(int signum) {
     if (signum == SIGUSR1) {
-        // CPU 버스트 감소
         my_cpu_burst--;
-        printf("  [CHILD %d] Executing... CPU burst remaining: %d\n", getpid(), my_cpu_burst);
-        fflush(stdout);
         
         if (my_cpu_burst <= 0) {
-            // CPU 버스트가 0이 되면 종료 또는 I/O
             int choice = rand() % 2;
             
             if (choice == 0) {
-                // 프로세스 종료
-                printf("  [CHILD %d] CPU burst completed, terminating\n", getpid());
-                fflush(stdout);
                 exit(0);
             } else {
-                // I/O 요청
-                printf("  [CHILD %d] CPU burst completed, requesting I/O\n", getpid());
-                fflush(stdout);
                 kill(getppid(), SIGUSR2);
-                
-                // I/O 완료 후 새로운 CPU 버스트 할당
                 my_cpu_burst = (rand() % (MAX_CPU_BURST - MIN_CPU_BURST + 1)) + MIN_CPU_BURST;
-                printf("  [CHILD %d] New CPU burst assigned: %d\n", getpid(), my_cpu_burst);
-                fflush(stdout);
             }
         }
     }
@@ -298,71 +323,63 @@ void child_signal_handler(int signum) {
 
 // 부모 프로세스
 void parent_process() {
-    printf("[PARENT] Initializing scheduler...\n");
+    printf("\n");
+    printf("╔════════════════════════════════════════════════╗\n");
+    printf("║                                                ║\n");
+    printf("║     " COLOR_CYAN "OS 스케줄링 시뮬레이션" COLOR_RESET "                ║\n");
+    printf("║                                                ║\n");
+    printf("║     프로세스 수: " COLOR_YELLOW "%2d" COLOR_RESET "                        ║\n", NUM_PROCESSES);
+    printf("║     타임퀀텀:    " COLOR_YELLOW "%2d" COLOR_RESET "                        ║\n", TIME_QUANTUM);
+    printf("║                                                ║\n");
+    printf("╚════════════════════════════════════════════════╝\n\n");
     fflush(stdout);
     
-    // 시그널 핸들러 설정
     signal(SIGALRM, timer_handler);
     signal(SIGUSR2, io_request_handler);
     signal(SIGCHLD, child_done_handler);
     
-    // PCB 초기화 및 자식 프로세스 생성
+    printf(COLOR_GREEN "프로세스 생성 중..." COLOR_RESET "\n");
     for (int i = 0; i < NUM_PROCESSES; i++) {
         pid_t pid = fork();
         
         if (pid == 0) {
-            // 자식 프로세스
             child_process(i);
             exit(0);
         } else {
-            // 부모 프로세스 - PCB 초기화
             pcb[i].pid = pid;
             pcb[i].quantum = TIME_QUANTUM;
-            pcb[i].cpu_burst = 0; // 자식이 초기화
+            pcb[i].cpu_burst = 0;
             pcb[i].io_wait = 0;
             pcb[i].state = READY;
             
-            printf("[PARENT] Created Process %d with PID %d\n", i, pid);
+            printf("  ✓ P%d (PID: %d)\n", i, pid);
             fflush(stdout);
             
-            // Ready 큐에 추가
             push_ready(i);
         }
     }
     
-    printf("\n[PARENT] All processes created, starting scheduler...\n\n");
+    printf("\n" COLOR_GREEN "스케줄러 시작..." COLOR_RESET "\n");
     fflush(stdout);
     
-    // 자식들이 준비될 때까지 대기
     sleep(2);
     
-    // 초기 스케줄링
-    print_queue_status();
+    print_status();
     schedule();
     
-    // 타이머 시작 (1초마다)
     alarm(1);
     
-    // 무한 루프
     while (1) {
-        pause(); // 시그널 대기
+        pause();
     }
 }
 
 // 자식 프로세스
 void child_process(int id) {
     srand(time(NULL) + getpid());
-    
-    // CPU 버스트 초기화
     my_cpu_burst = (rand() % (MAX_CPU_BURST - MIN_CPU_BURST + 1)) + MIN_CPU_BURST;
-    
-    printf("  [CHILD %d] Started with CPU burst: %d\n", getpid(), my_cpu_burst);
-    fflush(stdout);
-    
-    // 시그널 핸들러 설정
     signal(SIGUSR1, child_signal_handler);
     
-    // 무한 루프 (시그널 대기)
     while (1) {
         pause();
     }
@@ -370,14 +387,6 @@ void child_process(int id) {
 
 int main() {
     srand(time(NULL));
-    
-    printf("===== OS Scheduling Simulation =====\n");
-    printf("Number of Processes: %d\n", NUM_PROCESSES);
-    printf("Time Quantum: %d\n", TIME_QUANTUM);
-    printf("====================================\n\n");
-    fflush(stdout);
-    
     parent_process();
-    
     return 0;
 }

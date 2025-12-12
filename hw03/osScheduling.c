@@ -53,6 +53,7 @@ void child_process(){
     srand(getpid());
 
     int cpu = rand() % 10 + 1;
+    printf("[Child %d] CPU burst initialized: %d\n", getpid(), cpu);
 
     while(1){
         pause();  // 부모가 SIGUSR1 보낼 때까지 대기
@@ -60,17 +61,24 @@ void child_process(){
         if(child_signal){
             child_signal = 0;
             cpu--;
+            printf("[Child %d] CPU burst remaining: %d\n", getpid(), cpu);
 
             if(cpu <= 0){
                 int do_io = rand() % 2;
 
                 if(do_io == 0){
                     /* 종료 */
+                    printf("[Child %d] Terminating\n", getpid());
                     exit(0);
                 } else {
                     /* I/O 요청 -> 부모에게 SIGUSR2 */
+                    printf("[Child %d] Requesting I/O\n", getpid());
                     kill(getppid(), SIGUSR2);
-                    pause(); // 부모가 다시 READY 넣어줄 때까지 BLOCK
+                    pause(); // I/O 완료 시그널 대기
+                    
+                    // I/O 완료 후 새로운 CPU 버스트
+                    cpu = rand() % 10 + 1;
+                    printf("[Child %d] I/O complete, new CPU burst: %d\n", getpid(), cpu);
                 }
             }
         }
@@ -104,7 +112,8 @@ int all_tq_zero(){
 void timer_tick(int sig){
     static int tick=0;
     tick++;
-    printf("\n===== TICK %d =====\n", tick);
+    printf("\n===== TICK %d ===== (Running: %d, Ready: %d, Sleep: %d, Done: %d)\n", 
+           tick, running>=0?1:0, (rq_tail-rq_head+NPROC)%NPROC, sleep_cnt, done_cnt);
 
     /* I/O wait 감소 */
     for(int i=0;i<NPROC;i++){
@@ -125,16 +134,20 @@ void timer_tick(int sig){
         running = pop_ready();
         if(running != -1){
             pcb[running].state = RUNNING;
-            printf("PID %d 스케줄됨\n", pcb[running].pid);
+            printf("PID %d 스케줄됨 (PCB index: %d)\n", pcb[running].pid, running);
+        } else {
+            printf("Ready 큐가 비어있음 (head=%d, tail=%d)\n", rq_head, rq_tail);
         }
     }
 
     if(running != -1){
         /* 타임퀀텀 감소 */
         pcb[running].time_quantum--;
+        printf("PID %d 실행중 (TQ: %d)\n", pcb[running].pid, pcb[running].time_quantum);
 
         /* 자식에 SIGUSR1 보내서 1틱 실행 */
         kill(pcb[running].pid, SIGUSR1);
+        usleep(10000); // 자식이 처리할 시간 부여
 
         /* 자식이 I/O 요청 보냈는지 확인 */
         if(io_request){
@@ -159,6 +172,7 @@ void timer_tick(int sig){
             }
             else if(pcb[running].time_quantum <= 0){
                 /* 타임퀀텀 소진 → preempt */
+                printf("PID %d 타임퀀텀 소진 -> READY\n", pcb[running].pid);
                 pcb[running].state = READY;
                 pcb[running].time_quantum = INIT_TQ;
                 push_ready(running);
@@ -180,6 +194,8 @@ void timer_tick(int sig){
 }
 
 int main(){
+    setbuf(stdout, NULL); // 출력 버퍼 비활성화
+    
     init();
 
     signal(SIGUSR2, parent_io_signal);
@@ -194,8 +210,14 @@ int main(){
         }
         pcb[i].pid = pid;
         push_ready(i);
+        printf("Created child PID %d (index %d), TQ=%d\n", pid, i, pcb[i].time_quantum);
     }
 
+    printf("\nAll children created. Starting scheduler...\n");
+    printf("Ready queue: head=%d, tail=%d\n", rq_head, rq_tail);
+    
+    sleep(1); // 자식들이 초기화될 시간을 줌
+    
     alarm(1);
 
     /* 부모 메인 루프 */

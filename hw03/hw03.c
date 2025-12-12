@@ -64,9 +64,9 @@ void print_queue_status();
 // Ready 큐 상태 출력 (디버깅용)
 void print_queue_status() {
     int count = (ready_rear - ready_front + QUEUE_SIZE) % QUEUE_SIZE;
-    printf("[DEBUG] Ready queue: front=%d, rear=%d, count=%d | ", 
+    printf("[DEBUG] Ready 큐: front=%d, rear=%d, count=%d | ", 
            ready_front, ready_rear, count);
-    printf("Current process: %d | Done: %d/%d | Sleep queue: %d\n", 
+    printf("Current process: %d | Done: %d/%d | Sleep 큐: %d\n", 
            current_process, done_count, NUM_PROCESSES, sleep_count);
     fflush(stdout);
 }
@@ -78,7 +78,7 @@ void push_ready(int idx) {
     ready_queue[ready_rear] = idx;
     ready_rear = (ready_rear + 1) % QUEUE_SIZE;  // QUEUE_SIZE로 나눔
     pcb[idx].state = READY;
-    printf("[DEBUG] Process %d pushed to Ready queue\n", idx);
+    printf("[DEBUG] Process %d pushed to Ready 큐\n", idx);
     fflush(stdout);
 }
 
@@ -89,7 +89,7 @@ int pop_ready() {
     }
     int idx = ready_queue[ready_front];
     ready_front = (ready_front + 1) % QUEUE_SIZE;  // QUEUE_SIZE로 나눔
-    printf("[DEBUG] Process %d popped from Ready queue\n", idx);
+    printf("[DEBUG] Process %d popped from Ready 큐\n", idx);
     fflush(stdout);
     return idx;
 }
@@ -107,7 +107,7 @@ void update_sleep_queue() {
         pcb[idx].io_wait--;
         
         if (pcb[idx].io_wait <= 0) {
-            printf("[PARENT] Process %d (PID: %d) I/O completed, moving to Ready queue\n", 
+            printf("[PARENT] Process %d (PID: %d) I/O completed, moving to Ready 큐\n", 
                    idx, pcb[idx].pid);
             fflush(stdout);
             
@@ -136,7 +136,7 @@ int all_quantum_zero() {
 
 // 모든 프로세스의 타임퀀텀 초기화
 void reset_all_quantum() {
-    printf("[PARENT] All quantum exhausted, resetting all processes' quantum\n");
+    printf("[PARENT] 모든 퀀텀 소진, 모든 프로세스의 퀀텀 초기화\n");
     fflush(stdout);
     for (int i = 0; i < NUM_PROCESSES; i++) {
         if (pcb[i].state != DONE) {
@@ -182,12 +182,12 @@ void timer_handler(int signum) {
     // 현재 실행 중인 프로세스 처리
     if (current_process != -1 && pcb[current_process].state == RUNNING) {
         pcb[current_process].quantum--;
-        printf("[PARENT] Process %d quantum: %d -> %d\n", 
+        printf("[PARENT] Process %d 퀀텀: %d -> %d\n", 
                current_process, pcb[current_process].quantum + 1, pcb[current_process].quantum);
         fflush(stdout);
         
         if (pcb[current_process].quantum <= 0) {
-            printf("[PARENT] Process %d quantum exhausted, preempting\n", current_process);
+            printf("[PARENT] Process %d 퀀텀 소진, 선점\n", current_process);
             fflush(stdout);
             
             // Ready 큐에 추가하고 다음 프로세스로
@@ -216,13 +216,13 @@ void timer_handler(int signum) {
 // I/O 요청 시그널 핸들러
 void io_request_handler(int signum) {
     if (current_process != -1) {
-        printf("[PARENT] Process %d (PID: %d) requested I/O\n", 
+        printf("[PARENT] Process %d (PID: %d) I/O 요청\n", 
                current_process, pcb[current_process].pid);
         fflush(stdout);
         
         // I/O 대기 시간 랜덤 할당
         pcb[current_process].io_wait = (rand() % (MAX_IO_WAIT - MIN_IO_WAIT + 1)) + MIN_IO_WAIT;
-        printf("[PARENT] Assigning I/O wait time: %d ticks\n", pcb[current_process].io_wait);
+        printf("[PARENT] I/O 대기 시간 할당: %d 틱\n", pcb[current_process].io_wait);
         fflush(stdout);
         
         // Sleep 큐에 추가
@@ -243,14 +243,14 @@ void schedule() {
         if (next != -1) {
             current_process = next;
             pcb[current_process].state = RUNNING;
-            printf("[PARENT] Scheduling Process %d (PID: %d, Quantum: %d)\n", 
+            printf("[PARENT] Scheduling Process %d (PID: %d, 퀀텀: %d)\n", 
                    current_process, pcb[current_process].pid, pcb[current_process].quantum);
             fflush(stdout);
             
             // 프로세스 실행 시그널 전송
             kill(pcb[current_process].pid, SIGUSR1);
         } else {
-            printf("[PARENT] No process in Ready queue\n");
+            printf("[PARENT] No process in Ready 큐\n");
             fflush(stdout);
         }
     }

@@ -194,8 +194,6 @@ void timer_tick(int sig){
 }
 
 int main(){
-    setbuf(stdout, NULL); // 출력 버퍼 비활성화
-    
     init();
 
     signal(SIGUSR2, parent_io_signal);
@@ -210,14 +208,8 @@ int main(){
         }
         pcb[i].pid = pid;
         push_ready(i);
-        printf("Created child PID %d (index %d), TQ=%d\n", pid, i, pcb[i].time_quantum);
     }
 
-    printf("\nAll children created. Starting scheduler...\n");
-    printf("Ready queue: head=%d, tail=%d\n", rq_head, rq_tail);
-    
-    sleep(1); // 자식들이 초기화될 시간을 줌
-    
     alarm(1);
 
     /* 부모 메인 루프 */

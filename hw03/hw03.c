@@ -329,8 +329,9 @@ void schedule() {
 
 // 자식 프로세스 시그널 핸들러 (단순화)
 void child_signal_handler(int signum) {
-    // SIGUSR1을 받으면 실행되었다는 의미
-    // 실제 로직은 부모가 모두 처리
+    if (signum == SIGTERM) {
+        exit(0);
+    }
 }
 
 // 부모 프로세스 (커널 역할)
@@ -391,7 +392,8 @@ void parent_process() {
 // 자식 프로세스
 void child_process(int id) {
     signal(SIGUSR1, child_signal_handler);
-
+    signal(SIGTERM, child_signal_handler); 
+    
     while (1) {
         pause();
     }

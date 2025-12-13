@@ -71,7 +71,7 @@ void print_statistics();
 
 // 성능 통계 출력
 void print_statistics() {
-    printf("\n========== Performance Statistics ==========\n");
+    printf("\n========== 성능 통계 ==========\n");
     printf("P#\tWait\tResponse\tTurnaround\tWait Count\n");
     printf("--------------------------------------------\n");
     

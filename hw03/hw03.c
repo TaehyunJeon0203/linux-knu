@@ -27,7 +27,7 @@ typedef enum {
 typedef struct {
     pid_t pid;
     int quantum;
-    int cpu_burst;  // 부모가 추적할 CPU 버스트
+    int cpu_burst;
     int io_wait;
     ProcessState state;
     
@@ -71,8 +71,8 @@ void print_statistics();
 
 // 성능 통계 출력
 void print_statistics() {
-    printf("\n========== 성능 통계 ==========\n");
-    printf("P#\tWait\tResponse\tTurnaround\tWait Count\n");
+    printf("\n========== 성능 분석 결과 ==========\n");
+    printf("P#\t대기시간\t응답시간\t반환시간\t대기횟수\n");
     printf("--------------------------------------------\n");
     
     int total_wait = 0;
@@ -83,7 +83,7 @@ void print_statistics() {
         int response_time = pcb[i].first_run_time - pcb[i].creation_time;
         int turnaround_time = pcb[i].completion_time - pcb[i].creation_time;
         
-        printf("%d\t%d\t%d\t\t%d\t\t%d\n",
+        printf("%d\t%d\t\t%d\t\t%d\t\t%d\n",
                i,
                pcb[i].total_wait_time,
                response_time,
@@ -96,11 +96,11 @@ void print_statistics() {
     }
     
     printf("--------------------------------------------\n");
-    printf("Avg\t%.1f\t%.1f\t\t%.1f\n",
+    printf("평균\t%.1f\t\t%.1f\t\t%.1f\n",
            total_wait / (float)NUM_PROCESSES,
            total_response / (float)NUM_PROCESSES,
            total_turnaround / (float)NUM_PROCESSES);
-    printf("============================================\n\n");
+    printf("========================================\n\n");
 }
 
 // Ready 큐에 추가
@@ -134,14 +134,14 @@ void push_sleep(int idx) {
     pcb[idx].state = SLEEPING;
 }
 
-// Sleep 큐 업데이트
+// Sleep 큐 업데이트 (대기 시간 감소)
 void update_sleep_queue() {
     for (int i = 0; i < sleep_count; i++) {
         int idx = sleep_queue[i];
         pcb[idx].io_wait--;
         
         if (pcb[idx].io_wait <= 0) {
-            printf("  [I/O] P%d I/O 완료 -> Ready 큐\n", idx);
+            printf("  [I/O완료] P%d I/O 대기시간 만료 -> ready 큐로 이동\n", idx);
             push_ready(idx);
             
             for (int j = i; j < sleep_count - 1; j++) {
@@ -163,9 +163,9 @@ int all_quantum_zero() {
     return 1;
 }
 
-// 모든 프로세스의 타임퀀텀 초기화
+// 전체 프로세스의 타임퀀텀 초기화
 void reset_all_quantum() {
-    printf("  [RESET] 모든 프로세스 타임퀀텀 초기화\n");
+    printf("  [타임퀀텀 초기화] 모든 프로세스의 타임퀀텀 초기화\n");
     for (int i = 0; i < NUM_PROCESSES; i++) {
         if (pcb[i].state != DONE) {
             pcb[i].quantum = TIME_QUANTUM;
@@ -181,7 +181,7 @@ void child_done_handler(int signum) {
     while ((child_pid = waitpid(-1, &status, WNOHANG)) > 0) {
         for (int i = 0; i < NUM_PROCESSES; i++) {
             if (pcb[i].pid == child_pid) {
-                printf("  [DONE] P%d 종료\n", i);
+                printf("  [프로세스 종료] P%d 종료\n", i);
                 pcb[i].state = DONE;
                 pcb[i].completion_time = timer_tick;
                 done_count++;
@@ -199,36 +199,42 @@ void child_done_handler(int signum) {
 // 타이머 시그널 핸들러
 void timer_handler(int signum) {
     timer_tick++;
-    printf("\n==================== [Tick %d] ====================\n", timer_tick);
+    printf("\n==================== [타이머 틱 %d] ====================\n", timer_tick);
     
+    // Sleep 큐 업데이트
     update_sleep_queue();
     
+    // 실행 중인 프로세스 처리
     if (current_process != -1 && pcb[current_process].state == RUNNING) {
+        // 타임퀀텀 1 감소
         pcb[current_process].quantum--;
         pcb[current_process].cpu_burst--;
         
-        printf("  [RUN] P%d 실행 (타임퀀텀: %d->%d, CPU버스트: %d)\n", 
+        printf("  [실행] P%d 실행 중 (남은 타임퀀텀: %d, 남은 CPU버스트: %d)\n", 
                current_process, 
-               pcb[current_process].quantum + 1, 
                pcb[current_process].quantum,
                pcb[current_process].cpu_burst);
         
+        // 타임퀀텀이 0이 되면 다음 프로세스로 변경
         if (pcb[current_process].quantum <= 0) {
-            printf("  [PREEMPT] P%d 타임퀀텀 소진 -> Ready 큐\n", current_process);
+            printf("  [타임퀀텀 소진] P%d 타임퀀텀 0 -> ready 큐로 이동\n", current_process);
             push_ready(current_process);
             current_process = -1;
         } else {
+            // 0이 아니면 현재 프로세스 계속 실행
             kill(pcb[current_process].pid, SIGUSR1);
         }
     }
     
+    // 모든 프로세스의 타임퀀텀이 0이 되면 전체 초기화
     if (all_quantum_zero() && done_count < NUM_PROCESSES) {
         reset_all_quantum();
     }
     
+    // 스케줄링
     schedule();
     
-    printf("===================================================\n");
+    printf("======================================================\n");
     
     if (done_count < NUM_PROCESSES) {
         alarm(1);
@@ -238,12 +244,13 @@ void timer_handler(int signum) {
 // I/O 요청 시그널 핸들러
 void io_request_handler(int signum) {
     if (current_process != -1) {
+        // I/O 대기시간 랜덤으로 할당 (1~5)
         pcb[current_process].io_wait = (rand() % (MAX_IO_WAIT - MIN_IO_WAIT + 1)) + MIN_IO_WAIT;
         
-        // 새로운 CPU 버스트 할당 (자식이 이미 할당했지만 부모도 추적)
+        // 새로운 CPU 버스트 할당
         pcb[current_process].cpu_burst = (rand() % (MAX_CPU_BURST - MIN_CPU_BURST + 1)) + MIN_CPU_BURST;
         
-        printf("  [I/O] P%d I/O 요청 (대기: %d틱, 새 CPU버스트: %d)\n", 
+        printf("  [I/O 요청] P%d I/O 요청 -> sleep 큐에 삽입 (대기시간: %d, 새 CPU버스트: %d)\n", 
                current_process, pcb[current_process].io_wait, pcb[current_process].cpu_burst);
         
         push_sleep(current_process);
@@ -252,7 +259,7 @@ void io_request_handler(int signum) {
     }
 }
 
-// 스케줄링 함수
+// 라운드로빈 스케줄링 수행
 void schedule() {
     if (current_process == -1) {
         int next = pop_ready();
@@ -265,7 +272,7 @@ void schedule() {
                 pcb[current_process].first_run_time = timer_tick;
             }
             
-            printf("  [SCHEDULE] P%d 스케줄링 (타임퀀텀: %d, CPU버스트: %d)\n", 
+            printf("  [스케줄링] P%d 스케줄링됨 (타임퀀텀: %d, CPU버스트: %d)\n", 
                    current_process, 
                    pcb[current_process].quantum,
                    pcb[current_process].cpu_burst);
@@ -285,14 +292,18 @@ void schedule() {
 // 자식 프로세스 시그널 핸들러
 void child_signal_handler(int signum) {
     if (signum == SIGUSR1) {
+        // 시그널을 받고 실행할 때마다 CPU 버스트 1 감소
         my_cpu_burst--;
         
+        // CPU 버스트가 0이 되면 프로세스 종료 혹은 I/O 수행(랜덤)
         if (my_cpu_burst <= 0) {
             int choice = rand() % 2;
             
             if (choice == 0) {
+                // 프로세스 종료
                 exit(0);
             } else {
+                // I/O 수행 - 부모 프로세스에 I/O 요청 시그널 보냄
                 kill(getppid(), SIGUSR2);
                 my_cpu_burst = (rand() % (MAX_CPU_BURST - MIN_CPU_BURST + 1)) + MIN_CPU_BURST;
             }
@@ -300,30 +311,33 @@ void child_signal_handler(int signum) {
     }
 }
 
-// 부모 프로세스
+// 부모 프로세스 (커널 역할)
 void parent_process() {
     printf("\n");
-    printf("===================================================\n");
+    printf("======================================================\n");
     printf("           OS 스케줄링 시뮬레이션\n");
-    printf("===================================================\n");
-    printf("  프로세스 수: %d\n", NUM_PROCESSES);
-    printf("  타임 퀀텀: %d\n", TIME_QUANTUM);
+    printf("======================================================\n");
+    printf("  자식 프로세스 수: %d개\n", NUM_PROCESSES);
+    printf("  타임퀀텀: %d\n", TIME_QUANTUM);
     printf("  CPU 버스트 범위: %d ~ %d\n", MIN_CPU_BURST, MAX_CPU_BURST);
-    printf("  I/O 대기 범위: %d ~ %d\n", MIN_IO_WAIT, MAX_IO_WAIT);
-    printf("===================================================\n\n");
+    printf("  I/O 대기시간 범위: %d ~ %d\n", MIN_IO_WAIT, MAX_IO_WAIT);
+    printf("======================================================\n\n");
     
+    // 시그널 핸들러 설정
     signal(SIGALRM, timer_handler);
     signal(SIGUSR2, io_request_handler);
     signal(SIGCHLD, child_done_handler);
     
-    printf("프로세스 생성 중...\n");
+    printf("자식 프로세스 10개 생성 중...\n");
     for (int i = 0; i < NUM_PROCESSES; i++) {
         pid_t pid = fork();
         
         if (pid == 0) {
+            // 자식 프로세스
             child_process(i);
             exit(0);
         } else {
+            // 부모 프로세스 - PCB로 자식 프로세스 관리
             pcb[i].pid = pid;
             pcb[i].quantum = TIME_QUANTUM;
             pcb[i].cpu_burst = (rand() % (MAX_CPU_BURST - MIN_CPU_BURST + 1)) + MIN_CPU_BURST;
@@ -342,7 +356,7 @@ void parent_process() {
         }
     }
     
-    printf("\n스케줄러 시작...\n");
+    printf("\n라운드로빈 스케줄링 시작...\n");
     sleep(2);
     
     schedule();
@@ -356,9 +370,15 @@ void parent_process() {
 // 자식 프로세스
 void child_process(int id) {
     srand(time(NULL) + getpid());
+    
+    // 처음 생성시 CPU 버스트 랜덤 초기화 (1~10)
     my_cpu_burst = (rand() % (MAX_CPU_BURST - MIN_CPU_BURST + 1)) + MIN_CPU_BURST;
+    
+    // 시그널 핸들러 설정
     signal(SIGUSR1, child_signal_handler);
     
+    // sleep() 상태로 대기
+    // 부모 프로세스가 해당 프로세스를 스케줄링하여 시그널을 보내면 실행 시작
     while (1) {
         pause();
     }

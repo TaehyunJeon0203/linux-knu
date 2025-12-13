@@ -165,6 +165,8 @@ int pop_ready() {
 
 // Sleep 큐에 추가
 void push_sleep(int idx) {
+    if (pcb[idx].state == DONE) return;
+
     sleep_queue[sleep_count++] = idx;
     pcb[idx].state = SLEEPING;
 }
@@ -173,6 +175,16 @@ void push_sleep(int idx) {
 void update_sleep_queue() {
     for (int i = 0; i < sleep_count; i++) {
         int idx = sleep_queue[i];
+
+        if (pcb[idx].state == DONE) {
+            for (int j = i; j < sleep_count - 1; j++) {
+                sleep_queue[j] = sleep_queue[j + 1];
+            }
+            sleep_count--;
+            i--;
+            continue;
+        }
+        
         pcb[idx].io_wait--;
         
         if (pcb[idx].io_wait <= 0) {

@@ -304,6 +304,8 @@ void schedule() {
             current_process = next;
             pcb[current_process].state = RUNNING;
             
+            pcb[current_process].quantum = TIME_QUANTUM;
+            
             if (pcb[current_process].first_run_time == -1) {
                 pcb[current_process].first_run_time = timer_tick;
             }
@@ -315,6 +317,15 @@ void schedule() {
             kill(pcb[current_process].pid, SIGUSR1);
         }
     }
+    
+    if (done_count >= NUM_PROCESSES) {
+        printf("\n========================================\n");
+        printf("모든 프로세스 완료!\n");
+        printf("========================================\n");
+        print_statistics();
+        exit(0);
+    }
+}
     
     if (done_count >= NUM_PROCESSES) {
         printf("\n========================================\n");

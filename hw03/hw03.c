@@ -228,14 +228,19 @@ void child_done_handler(int signum) {
     while ((child_pid = waitpid(-1, &status, WNOHANG)) > 0) {
         for (int i = 0; i < NUM_PROCESSES; i++) {
             if (pcb[i].pid == child_pid) {
-                printf("  [프로세스 종료] P%d 종료\n", i);
-                pcb[i].state = DONE;
-                pcb[i].completion_time = timer_tick;
-                done_count++;
-                
-                if (current_process == i) {
-                    current_process = -1;
-                    schedule();
+                // ⭐ 이미 DONE 상태면 중복 처리 방지
+                if (pcb[i].state == DONE) {
+                    printf("  [SIGCHLD] P%d 종료 확인 (이미 처리됨)\n", i);
+                } else {
+                    printf("  [프로세스 종료] P%d 종료\n", i);
+                    pcb[i].state = DONE;
+                    pcb[i].completion_time = timer_tick;
+                    done_count++;
+                    
+                    if (current_process == i) {
+                        current_process = -1;
+                        schedule();
+                    }
                 }
                 break;
             }
@@ -266,6 +271,11 @@ void timer_handler(int signum) {
             if (choice == 0) {
                 // 프로세스 종료
                 printf("  [CPU버스트 소진] P%d 종료 선택\n", current_process);
+                
+                pcb[current_process].state = DONE;
+                pcb[current_process].completion_time = timer_tick;
+                done_count++;
+                
                 kill(pcb[current_process].pid, SIGTERM);
                 current_process = -1;
             } else {

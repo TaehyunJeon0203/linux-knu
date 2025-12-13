@@ -240,12 +240,9 @@ void timer_handler(int signum) {
     timer_tick++;
     printf("\n==================== [타이머 틱 %d] ====================\n", timer_tick);
     
-    // Sleep 큐 업데이트
     update_sleep_queue();
     
-    // 실행 중인 프로세스 처리
     if (current_process != -1 && pcb[current_process].state == RUNNING) {
-        // 타임퀀텀 1 감소
         pcb[current_process].quantum--;
         pcb[current_process].cpu_burst--;
         
@@ -254,26 +251,21 @@ void timer_handler(int signum) {
                pcb[current_process].quantum,
                pcb[current_process].cpu_burst);
         
-        // 타임퀀텀이 0이 되면 다음 프로세스로 변경
         if (pcb[current_process].quantum <= 0) {
             printf("  [타임퀀텀 소진] P%d 타임퀀텀 0 -> ready 큐로 이동\n", current_process);
             push_ready(current_process);
             current_process = -1;
         } else {
-            // 0이 아니면 현재 프로세스 계속 실행
             kill(pcb[current_process].pid, SIGUSR1);
         }
     }
-    
-    // 모든 프로세스의 타임퀀텀이 0이 되면 전체 초기화
+
     if (all_quantum_zero() && done_count < NUM_PROCESSES) {
         reset_all_quantum();
     }
     
-    // 스케줄링
     schedule();
     
-    // 큐 상태 출력
     print_queue_status();
     
     printf("======================================================\n");
@@ -334,18 +326,14 @@ void schedule() {
 // 자식 프로세스 시그널 핸들러
 void child_signal_handler(int signum) {
     if (signum == SIGUSR1) {
-        // 시그널을 받고 실행할 때마다 CPU 버스트 1 감소
         my_cpu_burst--;
         
-        // CPU 버스트가 0이 되면 프로세스 종료 혹은 I/O 수행(랜덤)
         if (my_cpu_burst <= 0) {
             int choice = rand() % 2;
             
             if (choice == 0) {
-                // 프로세스 종료
                 exit(0);
             } else {
-                // I/O 수행 - 부모 프로세스에 I/O 요청 시그널 보냄
                 kill(getppid(), SIGUSR2);
                 my_cpu_burst = (rand() % (MAX_CPU_BURST - MIN_CPU_BURST + 1)) + MIN_CPU_BURST;
             }
@@ -412,8 +400,6 @@ void parent_process() {
 // 자식 프로세스
 void child_process(int id) {
     srand(time(NULL) + getpid());
-    
-    my_cpu_burst = (rand() % (MAX_CPU_BURST - MIN_CPU_BURST + 1)) + MIN_CPU_BURST;
 
     signal(SIGUSR1, child_signal_handler);
 

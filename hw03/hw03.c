@@ -50,14 +50,10 @@ int current_process = -1;
 int done_count = 0;
 int timer_tick = 0;
 
-// 자식 프로세스의 CPU 버스트
-int my_cpu_burst = 0;
-
 // 함수 선언
 void parent_process();
 void child_process(int id);
 void timer_handler(int signum);
-void io_request_handler(int signum);
 void child_signal_handler(int signum);
 void child_done_handler(int signum);
 void schedule();
@@ -251,11 +247,35 @@ void timer_handler(int signum) {
                pcb[current_process].quantum,
                pcb[current_process].cpu_burst);
         
-        if (pcb[current_process].quantum <= 0) {
+        // CPU 버스트가 0이 되면 종료 또는 I/O
+        if (pcb[current_process].cpu_burst <= 0) {
+            int choice = rand() % 2;
+            
+            if (choice == 0) {
+                // 프로세스 종료
+                printf("  [CPU버스트 소진] P%d 종료 선택\n", current_process);
+                kill(pcb[current_process].pid, SIGTERM);
+                current_process = -1;
+            } else {
+                // I/O 수행
+                pcb[current_process].io_wait = (rand() % (MAX_IO_WAIT - MIN_IO_WAIT + 1)) + MIN_IO_WAIT;
+                pcb[current_process].cpu_burst = (rand() % (MAX_CPU_BURST - MIN_CPU_BURST + 1)) + MIN_CPU_BURST;
+                
+                printf("  [CPU버스트 소진] P%d I/O 수행 -> sleep 큐에 삽입 (대기시간: %d, 새 CPU버스트: %d)\n", 
+                       current_process, pcb[current_process].io_wait, pcb[current_process].cpu_burst);
+                
+                push_sleep(current_process);
+                current_process = -1;
+            }
+        }
+        // 타임퀀텀 소진
+        else if (pcb[current_process].quantum <= 0) {
             printf("  [타임퀀텀 소진] P%d 타임퀀텀 0 -> ready 큐로 이동\n", current_process);
             push_ready(current_process);
             current_process = -1;
-        } else {
+        } 
+        // 계속 실행
+        else {
             kill(pcb[current_process].pid, SIGUSR1);
         }
     }
@@ -272,24 +292,6 @@ void timer_handler(int signum) {
     
     if (done_count < NUM_PROCESSES) {
         alarm(1);
-    }
-}
-
-// I/O 요청 시그널 핸들러
-void io_request_handler(int signum) {
-    if (current_process != -1) {
-        // I/O 대기시간 랜덤으로 할당 (1~5)
-        pcb[current_process].io_wait = (rand() % (MAX_IO_WAIT - MIN_IO_WAIT + 1)) + MIN_IO_WAIT;
-        
-        // 새로운 CPU 버스트 할당
-        pcb[current_process].cpu_burst = (rand() % (MAX_CPU_BURST - MIN_CPU_BURST + 1)) + MIN_CPU_BURST;
-        
-        printf("  [I/O 요청] P%d I/O 요청 -> sleep 큐에 삽입 (대기시간: %d, 새 CPU버스트: %d)\n", 
-               current_process, pcb[current_process].io_wait, pcb[current_process].cpu_burst);
-        
-        push_sleep(current_process);
-        current_process = -1;
-        schedule();
     }
 }
 
@@ -323,22 +325,10 @@ void schedule() {
     }
 }
 
-// 자식 프로세스 시그널 핸들러
+// 자식 프로세스 시그널 핸들러 (단순화)
 void child_signal_handler(int signum) {
-    if (signum == SIGUSR1) {
-        my_cpu_burst--;
-        
-        if (my_cpu_burst <= 0) {
-            int choice = rand() % 2;
-            
-            if (choice == 0) {
-                exit(0);
-            } else {
-                kill(getppid(), SIGUSR2);
-                my_cpu_burst = (rand() % (MAX_CPU_BURST - MIN_CPU_BURST + 1)) + MIN_CPU_BURST;
-            }
-        }
-    }
+    // SIGUSR1을 받으면 실행되었다는 의미
+    // 실제 로직은 부모가 모두 처리
 }
 
 // 부모 프로세스 (커널 역할)
@@ -355,7 +345,6 @@ void parent_process() {
     
     // 시그널 핸들러 설정
     signal(SIGALRM, timer_handler);
-    signal(SIGUSR2, io_request_handler);
     signal(SIGCHLD, child_done_handler);
     
     printf("자식 프로세스 10개 생성 중...\n");
@@ -399,8 +388,6 @@ void parent_process() {
 
 // 자식 프로세스
 void child_process(int id) {
-    srand(time(NULL) + getpid());
-
     signal(SIGUSR1, child_signal_handler);
 
     while (1) {

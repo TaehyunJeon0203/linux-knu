@@ -9,7 +9,7 @@
 
 #define NUM_PROCESSES 10
 #define TIME_QUANTUM 10
-#define MAX_CPU_BURST 10
+#define MAX_CPU_BURST 1
 #define MIN_CPU_BURST 1
 #define MAX_IO_WAIT 5
 #define MIN_IO_WAIT 1

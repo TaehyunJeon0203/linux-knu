@@ -413,14 +413,10 @@ void parent_process() {
 void child_process(int id) {
     srand(time(NULL) + getpid());
     
-    // 처음 생성시 CPU 버스트 랜덤 초기화 (1~10)
     my_cpu_burst = (rand() % (MAX_CPU_BURST - MIN_CPU_BURST + 1)) + MIN_CPU_BURST;
-    
-    // 시그널 핸들러 설정
+
     signal(SIGUSR1, child_signal_handler);
-    
-    // sleep() 상태로 대기
-    // 부모 프로세스가 해당 프로세스를 스케줄링하여 시그널을 보내면 실행 시작
+
     while (1) {
         pause();
     }

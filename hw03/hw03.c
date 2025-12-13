@@ -68,6 +68,45 @@ void update_sleep_queue();
 int all_quantum_zero();
 void reset_all_quantum();
 void print_statistics();
+void print_queue_status();
+
+// Ready 큐 상태 출력
+void print_queue_status() {
+    printf("  [큐 상태] Ready 큐: [");
+    
+    if (ready_front == ready_rear) {
+        printf("비어있음");
+    } else {
+        int idx = ready_front;
+        int first = 1;
+        while (idx != ready_rear) {
+            if (!first) printf(", ");
+            printf("P%d", ready_queue[idx]);
+            first = 0;
+            idx = (idx + 1) % QUEUE_SIZE;
+        }
+    }
+    
+    printf("] | Sleep 큐: [");
+    
+    if (sleep_count == 0) {
+        printf("비어있음");
+    } else {
+        for (int i = 0; i < sleep_count; i++) {
+            if (i > 0) printf(", ");
+            printf("P%d(대기:%d)", sleep_queue[i], pcb[sleep_queue[i]].io_wait);
+        }
+    }
+    
+    printf("] | 실행 중: ");
+    if (current_process != -1) {
+        printf("P%d", current_process);
+    } else {
+        printf("없음");
+    }
+    
+    printf(" | 완료: %d/%d\n", done_count, NUM_PROCESSES);
+}
 
 // 성능 통계 출력
 void print_statistics() {
@@ -233,6 +272,9 @@ void timer_handler(int signum) {
     
     // 스케줄링
     schedule();
+    
+    // 큐 상태 출력
+    print_queue_status();
     
     printf("======================================================\n");
     

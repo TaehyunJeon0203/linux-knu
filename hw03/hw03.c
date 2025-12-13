@@ -8,7 +8,7 @@
 #include <string.h>
 
 #define NUM_PROCESSES 10
-#define TIME_QUANTUM 1
+#define TIME_QUANTUM 3
 #define MAX_CPU_BURST 10
 #define MIN_CPU_BURST 1
 #define MAX_IO_WAIT 5

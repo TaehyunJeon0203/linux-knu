@@ -27,7 +27,7 @@ typedef enum {
 typedef struct {
     pid_t pid;
     int quantum;
-    int cpu_burst;
+    int cpu_burst;  // 부모가 추적할 CPU 버스트
     int io_wait;
     ProcessState state;
     
@@ -141,7 +141,7 @@ void update_sleep_queue() {
         pcb[idx].io_wait--;
         
         if (pcb[idx].io_wait <= 0) {
-            printf("[Tick %d] P%d I/O completed -> Ready queue\n", timer_tick, idx);
+            printf("  [I/O] P%d I/O 완료 -> Ready 큐\n", idx);
             push_ready(idx);
             
             for (int j = i; j < sleep_count - 1; j++) {
@@ -165,7 +165,7 @@ int all_quantum_zero() {
 
 // 모든 프로세스의 타임퀀텀 초기화
 void reset_all_quantum() {
-    printf("[Tick %d] All quantum exhausted, resetting...\n", timer_tick);
+    printf("  [RESET] 모든 프로세스 타임퀀텀 초기화\n");
     for (int i = 0; i < NUM_PROCESSES; i++) {
         if (pcb[i].state != DONE) {
             pcb[i].quantum = TIME_QUANTUM;
@@ -181,7 +181,7 @@ void child_done_handler(int signum) {
     while ((child_pid = waitpid(-1, &status, WNOHANG)) > 0) {
         for (int i = 0; i < NUM_PROCESSES; i++) {
             if (pcb[i].pid == child_pid) {
-                printf("[Tick %d] P%d terminated\n", timer_tick, i);
+                printf("  [DONE] P%d 종료\n", i);
                 pcb[i].state = DONE;
                 pcb[i].completion_time = timer_tick;
                 done_count++;
@@ -199,19 +199,22 @@ void child_done_handler(int signum) {
 // 타이머 시그널 핸들러
 void timer_handler(int signum) {
     timer_tick++;
-    printf("\n[Tick %d]\n", timer_tick);
+    printf("\n==================== [Tick %d] ====================\n", timer_tick);
     
     update_sleep_queue();
     
     if (current_process != -1 && pcb[current_process].state == RUNNING) {
         pcb[current_process].quantum--;
-        printf("P%d running (quantum: %d -> %d)\n", 
+        pcb[current_process].cpu_burst--;
+        
+        printf("  [RUN] P%d 실행 (타임퀀텀: %d->%d, CPU버스트: %d)\n", 
                current_process, 
                pcb[current_process].quantum + 1, 
-               pcb[current_process].quantum);
+               pcb[current_process].quantum,
+               pcb[current_process].cpu_burst);
         
         if (pcb[current_process].quantum <= 0) {
-            printf("P%d quantum exhausted -> Ready queue\n", current_process);
+            printf("  [PREEMPT] P%d 타임퀀텀 소진 -> Ready 큐\n", current_process);
             push_ready(current_process);
             current_process = -1;
         } else {
@@ -225,6 +228,8 @@ void timer_handler(int signum) {
     
     schedule();
     
+    printf("===================================================\n");
+    
     if (done_count < NUM_PROCESSES) {
         alarm(1);
     }
@@ -234,8 +239,12 @@ void timer_handler(int signum) {
 void io_request_handler(int signum) {
     if (current_process != -1) {
         pcb[current_process].io_wait = (rand() % (MAX_IO_WAIT - MIN_IO_WAIT + 1)) + MIN_IO_WAIT;
-        printf("[Tick %d] P%d requested I/O (wait: %d ticks)\n", 
-               timer_tick, current_process, pcb[current_process].io_wait);
+        
+        // 새로운 CPU 버스트 할당 (자식이 이미 할당했지만 부모도 추적)
+        pcb[current_process].cpu_burst = (rand() % (MAX_CPU_BURST - MIN_CPU_BURST + 1)) + MIN_CPU_BURST;
+        
+        printf("  [I/O] P%d I/O 요청 (대기: %d틱, 새 CPU버스트: %d)\n", 
+               current_process, pcb[current_process].io_wait, pcb[current_process].cpu_burst);
         
         push_sleep(current_process);
         current_process = -1;
@@ -256,14 +265,17 @@ void schedule() {
                 pcb[current_process].first_run_time = timer_tick;
             }
             
-            printf("P%d scheduled (quantum: %d)\n", current_process, pcb[current_process].quantum);
+            printf("  [SCHEDULE] P%d 스케줄링 (타임퀀텀: %d, CPU버스트: %d)\n", 
+                   current_process, 
+                   pcb[current_process].quantum,
+                   pcb[current_process].cpu_burst);
             kill(pcb[current_process].pid, SIGUSR1);
         }
     }
     
     if (done_count >= NUM_PROCESSES) {
         printf("\n========================================\n");
-        printf("All processes completed!\n");
+        printf("모든 프로세스 완료!\n");
         printf("========================================\n");
         print_statistics();
         exit(0);
@@ -290,16 +302,21 @@ void child_signal_handler(int signum) {
 
 // 부모 프로세스
 void parent_process() {
-    printf("========================================\n");
-    printf("OS Scheduling Simulation\n");
-    printf("Processes: %d, Time Quantum: %d\n", NUM_PROCESSES, TIME_QUANTUM);
-    printf("========================================\n\n");
+    printf("\n");
+    printf("===================================================\n");
+    printf("           OS 스케줄링 시뮬레이션\n");
+    printf("===================================================\n");
+    printf("  프로세스 수: %d\n", NUM_PROCESSES);
+    printf("  타임 퀀텀: %d\n", TIME_QUANTUM);
+    printf("  CPU 버스트 범위: %d ~ %d\n", MIN_CPU_BURST, MAX_CPU_BURST);
+    printf("  I/O 대기 범위: %d ~ %d\n", MIN_IO_WAIT, MAX_IO_WAIT);
+    printf("===================================================\n\n");
     
     signal(SIGALRM, timer_handler);
     signal(SIGUSR2, io_request_handler);
     signal(SIGCHLD, child_done_handler);
     
-    printf("Creating processes...\n");
+    printf("프로세스 생성 중...\n");
     for (int i = 0; i < NUM_PROCESSES; i++) {
         pid_t pid = fork();
         
@@ -309,7 +326,7 @@ void parent_process() {
         } else {
             pcb[i].pid = pid;
             pcb[i].quantum = TIME_QUANTUM;
-            pcb[i].cpu_burst = 0;
+            pcb[i].cpu_burst = (rand() % (MAX_CPU_BURST - MIN_CPU_BURST + 1)) + MIN_CPU_BURST;
             pcb[i].io_wait = 0;
             pcb[i].state = READY;
             
@@ -320,12 +337,12 @@ void parent_process() {
             pcb[i].ready_enter_time = 0;
             pcb[i].wait_count = 0;
             
-            printf("P%d created (PID: %d)\n", i, pid);
+            printf("  P%d 생성 (PID: %d, 초기 CPU버스트: %d)\n", i, pid, pcb[i].cpu_burst);
             push_ready(i);
         }
     }
     
-    printf("\nStarting scheduler...\n");
+    printf("\n스케줄러 시작...\n");
     sleep(2);
     
     schedule();

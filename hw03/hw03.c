@@ -326,15 +326,6 @@ void schedule() {
         exit(0);
     }
 }
-    
-    if (done_count >= NUM_PROCESSES) {
-        printf("\n========================================\n");
-        printf("모든 프로세스 완료!\n");
-        printf("========================================\n");
-        print_statistics();
-        exit(0);
-    }
-}
 
 // 자식 프로세스 시그널 핸들러 (단순화)
 void child_signal_handler(int signum) {

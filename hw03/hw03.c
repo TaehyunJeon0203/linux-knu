@@ -228,7 +228,6 @@ void child_done_handler(int signum) {
     while ((child_pid = waitpid(-1, &status, WNOHANG)) > 0) {
         for (int i = 0; i < NUM_PROCESSES; i++) {
             if (pcb[i].pid == child_pid) {
-                // ⭐ 이미 DONE 상태면 중복 처리 방지
                 if (pcb[i].state == DONE) {
                     printf("  [SIGCHLD] P%d 종료 확인 (이미 처리됨)\n", i);
                 } else {
